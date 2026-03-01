@@ -1,5 +1,12 @@
 const axios = require('axios');
-const WeatherCache = require('../models/WeatherCache');
+
+// Try to load WeatherCache — if MongoDB is unavailable, gracefully skip caching
+let WeatherCache;
+try {
+    WeatherCache = require('../models/WeatherCache');
+} catch (e) {
+    WeatherCache = null;
+}
 
 const fetchWeatherData = async (city) => {
     const apiKey = process.env.OPENWEATHERMAP_API_KEY;
@@ -29,41 +36,54 @@ exports.getWeather = async (req, res) => {
     const cityKey = city.toLowerCase().trim();
 
     try {
-        // Check Cache
-        const cachedData = await WeatherCache.findOne({ cityKey });
-
-        // If cached within the last hour AND client didn't request fresh data
-        if (cachedData && cachedData.expiresAt > new Date() && req.query.fresh !== 'true') {
-            return res.status(200).json({
-                source: 'cache',
-                current: cachedData.current,
-                forecast: cachedData.forecast
-            });
+        // Try cache only if MongoDB is connected
+        if (WeatherCache && req.query.fresh !== 'true') {
+            try {
+                const cachedData = await WeatherCache.findOne({ cityKey });
+                if (cachedData && cachedData.expiresAt > new Date()) {
+                    return res.status(200).json({
+                        source: 'cache',
+                        current: cachedData.current,
+                        forecast: cachedData.forecast
+                    });
+                }
+            } catch (cacheErr) {
+                // Cache lookup failed — just skip it and fetch fresh
+                console.warn('Cache lookup failed, fetching fresh:', cacheErr.message);
+            }
         }
 
-        // Fetch from API
+        // Fetch from OpenWeatherMap API
         const data = await fetchWeatherData(cityKey);
 
-        // Update Cache
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 1); // 1 hour TTL
-
-        await WeatherCache.findOneAndUpdate(
-            { cityKey },
-            {
-                cityKey,
-                current: data.current,
-                forecast: data.forecast,
-                lat: data.current.coord.lat,
-                lon: data.current.coord.lon,
-                updatedAt: new Date(),
-                expiresAt
-            },
-            { upsert: true, new: true }
-        );
+        // Try to save to cache — but don't fail if MongoDB is down
+        if (WeatherCache) {
+            try {
+                const expiresAt = new Date();
+                expiresAt.setHours(expiresAt.getHours() + 1);
+                await WeatherCache.findOneAndUpdate(
+                    { cityKey },
+                    {
+                        cityKey,
+                        current: data.current,
+                        forecast: data.forecast,
+                        lat: data.current.coord.lat,
+                        lon: data.current.coord.lon,
+                        updatedAt: new Date(),
+                        expiresAt
+                    },
+                    { upsert: true, new: true }
+                );
+            } catch (cacheErr) {
+                console.warn('Cache save failed:', cacheErr.message);
+            }
+        }
 
         res.status(200).json({ source: 'api', ...data });
     } catch (error) {
-        res.status(error.message === 'City not found' ? 404 : 500).json({ success: false, error: error.message });
+        res.status(error.message === 'City not found' ? 404 : 500).json({
+            success: false,
+            error: error.message
+        });
     }
 };
