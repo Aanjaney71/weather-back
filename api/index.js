@@ -4,8 +4,18 @@ const axios = require('axios');
 
 const app = express();
 
+// Parse JSON bodies
 app.use(express.json());
-app.use(cors({ origin: '*' }));
+
+// Full CORS support — allow all origins and handle preflight
+const corsOptions = {
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    optionsSuccessStatus: 200
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Handle OPTIONS preflight for all routes
 
 // Root
 app.get('/', (req, res) => {
