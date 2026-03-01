@@ -29,6 +29,26 @@ app.get('/api/v1/health', (req, res) => {
     res.status(200).json({ status: 'ok', message: 'API is running' });
 });
 
+// Add a root route so visiting the Vercel app URL returns a friendly message
+app.get('/', (req, res) => {
+    res.status(200).json({
+        name: 'AtmosSphere Weather API',
+        status: 'online',
+        endpoints: [
+            '/api/v1/health',
+            '/api/v1/weather/:city'
+        ]
+    });
+});
+
+// Fallback for just /api/v1/weather
+app.get('/api/v1/weather', (req, res) => {
+    res.status(400).json({
+        error: 'Missing city parameter. Usage: /api/v1/weather/:city'
+    });
+});
+
+
 // Only listen when running locally (not on Vercel serverless)
 if (process.env.NODE_ENV !== 'production') {
     app.listen(PORT, () => {
